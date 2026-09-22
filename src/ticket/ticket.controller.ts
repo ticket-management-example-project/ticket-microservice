@@ -1,17 +1,10 @@
-import {
-  Controller,
-  OnModuleInit,
-} from '@nestjs/common';
+import { Controller } from '@nestjs/common';
 import { MessagePattern } from '@nestjs/microservices';
 import { TicketService } from './ticket.service';
 
 @Controller()
-export class TicketController implements OnModuleInit {
+export class TicketController {
   constructor(private readonly ticketService: TicketService) {}
-
-  onModuleInit() {
-    console.log('tickettt');
-  }
 
   // @Post()
   // create(@Body() createTicketDto: CreateTicketDto) {
@@ -23,10 +16,9 @@ export class TicketController implements OnModuleInit {
   //   return this.ticketService.findAll();
   // }
   //
-  @MessagePattern('caaaab')
+  @MessagePattern({ cmd: 'find_one_ticket' })
   // findOne(@Payload() data: { id: string }) {
   findOne() {
-    console.log('>');
     return {
       name: 'Ticket',
     };
