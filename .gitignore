@@ -3,6 +3,10 @@
 /node_modules
 /build
 
+# Generated Prisma Client (Prisma ORM 7's `prisma-client` generator writes
+# into the source tree instead of node_modules -- see prisma/schema.prisma)
+/src/generated
+
 # Logs
 logs
 *.log

@@ -1,0 +1,48 @@
+// Story 2.1: ticket-microservice's first real persistence, Event Sourcing
+// via Prisma (`^7.10.0`, AD-2 -- see spec Design Notes: the only service in
+// this codebase using Prisma instead of TypeORM/raw pg). `prisma migrate` is
+// NOT the source of truth for this schema (spec Boundaries & Constraints):
+// both tables below are created by hand-applied SQL
+// (`src/ticket/infrastructure/migrations/001-events-tickets.sql`) and this
+// file only maps (`@@map`/`@map`) onto them.
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Append-only event store, same shape as tenant-microservice's `events`
+// table (Snowflake ids, `aggregate_id`/`aggregate_type`, `seq_no` with
+// `UNIQUE(aggregate_id, seq_no)`) -- Debezium tails this directly (CDC, no
+// separate outbox table), routing dynamically by `aggregate_type`.
+model Event {
+  id            BigInt   @id
+  aggregateId   BigInt   @map("aggregate_id")
+  aggregateType String   @map("aggregate_type")
+  seqNo         Int      @map("seq_no")
+  eventType     String   @map("event_type")
+  payload       Json
+  occurredAt    DateTime @default(now()) @map("occurred_at")
+
+  @@unique([aggregateId, seqNo], map: "uq_events_aggregate_seq")
+  @@map("events")
+}
+
+// Read-side projection for the Ticket aggregate. Queries never read from
+// `Event` directly -- only from this projection, kept in sync by
+// `TicketProjection`'s `@EventsHandler`.
+model TicketReadModel {
+  id            BigInt   @id
+  tenantId      BigInt   @map("tenant_id")
+  subject       String
+  description   String
+  status        String
+  trackingToken String?  @unique @map("tracking_token")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @default(now()) @map("updated_at")
+
+  @@map("ticket_read_model")
+}
