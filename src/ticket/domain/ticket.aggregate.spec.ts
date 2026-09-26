@@ -17,6 +17,42 @@ describe('Ticket', () => {
     expect(ticket.description).toBe('Me pide un código que nunca llega');
     expect(ticket.status).toBe('open');
     expect(ticket.trackingToken).toBeNull();
+    expect(ticket.contactEmail).toBeNull();
+  });
+
+  it('creates a Ticket with a captured contactEmail, trimmed', () => {
+    const ticket = Ticket.create({
+      id: '1',
+      tenantId: 't-1',
+      subject: 'Asunto',
+      description: 'Descripción',
+      contactEmail: '  maria@example.com  ',
+    });
+
+    expect(ticket.contactEmail).toBe('maria@example.com');
+  });
+
+  it('creates a Ticket with contactEmail null when omitted -- never blocks creation', () => {
+    const ticket = Ticket.create({
+      id: '1',
+      tenantId: 't-1',
+      subject: 'Asunto',
+      description: 'Descripción',
+    });
+
+    expect(ticket.contactEmail).toBeNull();
+  });
+
+  it('rejects a malformed contactEmail', () => {
+    expect(() =>
+      Ticket.create({
+        id: '1',
+        tenantId: 't-1',
+        subject: 'Asunto',
+        description: 'Descripción',
+        contactEmail: 'not-an-email',
+      }),
+    ).toThrow(InvalidTicketException);
   });
 
   it('rejects an empty subject', () => {

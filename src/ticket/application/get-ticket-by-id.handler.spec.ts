@@ -2,7 +2,7 @@ import { GetTicketByIdQuery } from './get-ticket-by-id.query';
 import { GetTicketByIdHandler } from './get-ticket-by-id.handler';
 
 describe('GetTicketByIdHandler', () => {
-  it('resolves a Ticket by its aggregate id, omitting trackingToken/requesterId', async () => {
+  it('resolves a Ticket by its aggregate id, omitting trackingToken/requesterId but including contactEmail', async () => {
     const projection = {
       findById: jest.fn().mockResolvedValue({
         id: '1',
@@ -12,6 +12,7 @@ describe('GetTicketByIdHandler', () => {
         status: 'open',
         trackingToken: 'abc123',
         requesterId: null,
+        contactEmail: 'maria@example.com',
       }),
     };
     const handler = new GetTicketByIdHandler(projection as any);
@@ -25,6 +26,7 @@ describe('GetTicketByIdHandler', () => {
       subject: 'Asunto',
       description: 'Descripción',
       status: 'open',
+      contactEmail: 'maria@example.com',
     });
   });
 

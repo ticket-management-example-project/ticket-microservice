@@ -87,6 +87,7 @@ describe('CreateTicketHandler', () => {
       description: 'Me pide un código que nunca llega',
       status: 'open',
       trackingToken: 'abc123',
+      contactEmail: null,
     });
 
     expect(trackingTokenProvider.issue).toHaveBeenCalledWith(
@@ -109,6 +110,24 @@ describe('CreateTicketHandler', () => {
     expect(tokenIssuedCall[0].payload.data).toMatchObject({ token: 'abc123' });
 
     expect(projection.handle).toHaveBeenCalledTimes(2);
+  });
+
+  it('persists a captured contactEmail on the TicketCreated event/envelope', async () => {
+    const { handler, eventsRepository } = makeHandler();
+
+    const result = await handler.execute(
+      new CreateTicketCommand(
+        'soporte',
+        'Asunto',
+        'Descripción',
+        undefined,
+        'maria@example.com',
+      ),
+    );
+
+    expect(result.contactEmail).toBe('maria@example.com');
+    const [createdCall] = eventsRepository.append.mock.calls;
+    expect(createdCall[0].payload.data.contactEmail).toBe('maria@example.com');
   });
 
   it('throws TENANT_NOT_FOUND and persists nothing when the slug does not resolve to a Tenant', async () => {

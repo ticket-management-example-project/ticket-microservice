@@ -9,6 +9,12 @@ export type TicketStatus = 'open';
 
 const MAX_SUBJECT_LENGTH = 300;
 const MAX_DESCRIPTION_LENGTH = 10000;
+/** Mirrors `ticket_read_model.contact_email`'s `VARCHAR(255)` column width. */
+const MAX_CONTACT_EMAIL_LENGTH = 255;
+/** Same shape as `client-gateway`'s DTOs' `@IsEmail()` (loose defense in
+ * depth, not RFC 5322-exact) -- this domain guard only matters when
+ * `create_ticket` is invoked directly over NATS, bypassing the DTO. */
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
  * `Ticket` aggregate root -- `ticket-microservice`'s first real aggregate
@@ -31,16 +37,21 @@ export class Ticket extends AggregateRoot {
   private _status: TicketStatus;
   private _trackingToken: string | null;
   private _requesterId: string | null;
+  private _contactEmail: string | null;
 
   static create(props: {
     id: string;
     tenantId: string;
     subject: string;
     description: string;
+    /** Story 3.2: optional, never blocks creation when absent/empty (spec
+     * Boundaries & Constraints). Format is validated ONLY when present. */
+    contactEmail?: string | null;
   }): Ticket {
     const ticket = new Ticket();
     const subject = props.subject?.trim();
     const description = props.description?.trim();
+    const contactEmail = props.contactEmail?.trim() || null;
 
     if (!subject) {
       throw new InvalidTicketException('subject must not be empty');
@@ -58,6 +69,14 @@ export class Ticket extends AggregateRoot {
         `description must not exceed ${MAX_DESCRIPTION_LENGTH} characters`,
       );
     }
+    if (contactEmail && contactEmail.length > MAX_CONTACT_EMAIL_LENGTH) {
+      throw new InvalidTicketException(
+        `contactEmail must not exceed ${MAX_CONTACT_EMAIL_LENGTH} characters`,
+      );
+    }
+    if (contactEmail && !EMAIL_PATTERN.test(contactEmail)) {
+      throw new InvalidTicketException('contactEmail must be a valid email');
+    }
 
     ticket.apply(
       new TicketCreatedEvent(
@@ -66,6 +85,7 @@ export class Ticket extends AggregateRoot {
         subject,
         description,
         new Date().toISOString(),
+        contactEmail,
       ),
     );
     return ticket;
@@ -102,6 +122,10 @@ export class Ticket extends AggregateRoot {
     status: TicketStatus;
     trackingToken: string | null;
     requesterId: string | null;
+    /** Story 3.2: optional -- `LinkTicketToAccountHandler` (this method's
+     * only caller today) doesn't touch contactEmail, so it seeds `null` when
+     * omitted rather than requiring every call site to plumb it through. */
+    contactEmail?: string | null;
   }): Ticket {
     const ticket = new Ticket();
     ticket._id = props.id;
@@ -111,6 +135,7 @@ export class Ticket extends AggregateRoot {
     ticket._status = props.status;
     ticket._trackingToken = props.trackingToken;
     ticket._requesterId = props.requesterId;
+    ticket._contactEmail = props.contactEmail ?? null;
     return ticket;
   }
 
@@ -151,6 +176,7 @@ export class Ticket extends AggregateRoot {
     this._status = 'open';
     this._trackingToken = null;
     this._requesterId = null;
+    this._contactEmail = event.contactEmail ?? null;
   }
 
   onTicketTrackingTokenIssuedEvent(event: TicketTrackingTokenIssuedEvent) {
@@ -187,5 +213,9 @@ export class Ticket extends AggregateRoot {
 
   get requesterId(): string | null {
     return this._requesterId;
+  }
+
+  get contactEmail(): string | null {
+    return this._contactEmail;
   }
 }

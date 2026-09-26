@@ -58,6 +58,28 @@ describe('TicketController', () => {
     });
   });
 
+  it('create_ticket forwards contactEmail when the Requester captured one', async () => {
+    const { controller, commandBus } = makeController();
+
+    await controller.createTicket({
+      tenantSlug: 'soporte',
+      subject: 'Asunto',
+      description: 'Descripción',
+      correlationId: 'corr-1',
+      contactEmail: 'maria@example.com',
+    });
+
+    expect(commandBus.execute).toHaveBeenCalledWith(
+      new CreateTicketCommand(
+        'soporte',
+        'Asunto',
+        'Descripción',
+        'corr-1',
+        'maria@example.com',
+      ),
+    );
+  });
+
   it('get_ticket_by_token dispatches GetTicketByTokenQuery with the token', async () => {
     const { controller, queryBus } = makeController();
 

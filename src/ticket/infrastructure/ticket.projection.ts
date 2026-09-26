@@ -16,6 +16,9 @@ export interface TicketReadModel {
   /** Story 2.2: Clerk `sub` claim, `null` until `linkToAccount()` links this
    * Ticket to an account. */
   requesterId: string | null;
+  /** Story 3.2: optional Requester contact channel, `null` when not
+   * captured at creation. */
+  contactEmail: string | null;
   createdAt: string;
 }
 
@@ -76,8 +79,8 @@ export class TicketProjection implements IEventHandler<TicketDomainEvent> {
   ): Promise<void> {
     await client.$executeRaw(
       Prisma.sql`INSERT INTO ticket_read_model
-         (id, tenant_id, subject, description, status, tracking_token, created_at, updated_at)
-       VALUES (${event.aggregateId}::bigint, ${event.tenantId}::bigint, ${event.subject}, ${event.description}, 'open', NULL, ${event.occurredAt}::timestamptz, ${event.occurredAt}::timestamptz)
+         (id, tenant_id, subject, description, status, tracking_token, contact_email, created_at, updated_at)
+       VALUES (${event.aggregateId}::bigint, ${event.tenantId}::bigint, ${event.subject}, ${event.description}, 'open', NULL, ${event.contactEmail}, ${event.occurredAt}::timestamptz, ${event.occurredAt}::timestamptz)
        ON CONFLICT (id) DO NOTHING`,
     );
   }
@@ -142,7 +145,7 @@ export class TicketProjection implements IEventHandler<TicketDomainEvent> {
 
   async findById(id: string): Promise<TicketReadModel | null> {
     const rows = await this.prisma.$queryRaw<RawTicketRow[]>(
-      Prisma.sql`SELECT id, tenant_id, subject, description, status, tracking_token, requester_id, created_at
+      Prisma.sql`SELECT id, tenant_id, subject, description, status, tracking_token, requester_id, contact_email, created_at
        FROM ticket_read_model
        WHERE id = ${id}::bigint`,
     );
@@ -155,7 +158,7 @@ export class TicketProjection implements IEventHandler<TicketDomainEvent> {
    * token->ticket association only lives in this projection. */
   async findByTrackingToken(token: string): Promise<TicketReadModel | null> {
     const rows = await this.prisma.$queryRaw<RawTicketRow[]>(
-      Prisma.sql`SELECT id, tenant_id, subject, description, status, tracking_token, requester_id, created_at
+      Prisma.sql`SELECT id, tenant_id, subject, description, status, tracking_token, requester_id, contact_email, created_at
        FROM ticket_read_model
        WHERE tracking_token = ${token}`,
     );
@@ -173,7 +176,7 @@ export class TicketProjection implements IEventHandler<TicketDomainEvent> {
     tenantId: string,
   ): Promise<TicketReadModel[]> {
     const rows = await this.prisma.$queryRaw<RawTicketRow[]>(
-      Prisma.sql`SELECT id, tenant_id, subject, description, status, tracking_token, requester_id, created_at
+      Prisma.sql`SELECT id, tenant_id, subject, description, status, tracking_token, requester_id, contact_email, created_at
        FROM ticket_read_model
        WHERE requester_id = ${requesterId} AND tenant_id = ${tenantId}::bigint
        ORDER BY created_at DESC`,
@@ -190,6 +193,7 @@ export class TicketProjection implements IEventHandler<TicketDomainEvent> {
       status: row.status,
       trackingToken: row.tracking_token,
       requesterId: row.requester_id,
+      contactEmail: row.contact_email ?? null,
       createdAt:
         row.created_at instanceof Date
           ? row.created_at.toISOString()
@@ -206,5 +210,6 @@ interface RawTicketRow {
   status: string;
   tracking_token: string | null;
   requester_id: string | null;
+  contact_email?: string | null;
   created_at: string | Date;
 }

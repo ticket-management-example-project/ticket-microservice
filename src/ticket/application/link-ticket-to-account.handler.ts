@@ -117,6 +117,7 @@ export class LinkTicketToAccountHandler
           status: current.status as TicketStatus,
           trackingToken: current.trackingToken,
           requesterId: null,
+          contactEmail: current.contactEmail,
         }),
       );
       ticket.linkToAccount(command.requesterId);

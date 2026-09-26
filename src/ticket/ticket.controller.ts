@@ -42,6 +42,7 @@ export class TicketController {
         dto.subject,
         dto.description,
         dto.correlationId,
+        dto.contactEmail,
       ),
     );
   }

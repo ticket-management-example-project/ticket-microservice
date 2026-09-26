@@ -37,7 +37,7 @@ describe('TicketProjection', () => {
     return { prisma, txClient };
   };
 
-  it('handle(TicketCreated) inserts the read-model row inside a transaction, with a NULL tracking_token', async () => {
+  it('handle(TicketCreated) inserts the read-model row inside a transaction, with a NULL tracking_token/contact_email', async () => {
     const { prisma, txClient } = makePrisma();
     const projection = new TicketProjection(prisma as any);
 
@@ -54,6 +54,33 @@ describe('TicketProjection', () => {
       't-1',
       'No puedo iniciar sesión',
       'Me pide un código que nunca llega',
+      null,
+      '2026-01-01T00:00:00.000Z',
+      '2026-01-01T00:00:00.000Z',
+    ]);
+  });
+
+  it('handle(TicketCreated) persists a captured contactEmail', async () => {
+    const { prisma, txClient } = makePrisma();
+    const projection = new TicketProjection(prisma as any);
+    const createdWithEmail = new TicketCreatedEvent(
+      '1',
+      't-1',
+      'No puedo iniciar sesión',
+      'Me pide un código que nunca llega',
+      '2026-01-01T00:00:00.000Z',
+      'maria@example.com',
+    );
+
+    await projection.handle(createdWithEmail);
+
+    const [sqlFragment] = txClient.$executeRaw.mock.calls[0];
+    expect(sqlFragment.values).toEqual([
+      '1',
+      't-1',
+      'No puedo iniciar sesión',
+      'Me pide un código que nunca llega',
+      'maria@example.com',
       '2026-01-01T00:00:00.000Z',
       '2026-01-01T00:00:00.000Z',
     ]);
@@ -109,6 +136,8 @@ describe('TicketProjection', () => {
       description: 'Descripción',
       status: 'open',
       trackingToken: 'abc123',
+      requesterId: undefined,
+      contactEmail: null,
       createdAt: '2026-01-01T00:00:00.000Z',
     });
   });
@@ -252,6 +281,7 @@ describe('TicketProjection', () => {
         status: 'open',
         trackingToken: 'abc123',
         requesterId: 'user_1',
+        contactEmail: null,
         createdAt: '2026-01-01T00:00:00.000Z',
       },
     ]);

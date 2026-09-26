@@ -9,6 +9,11 @@ export interface GetTicketByIdResult {
   subject: string;
   description: string;
   status: string;
+  /** Story 3.2: exposed here (unlike `GetTicketByTokenResult`, the
+   * Requester's own token-scoped lookup, which never needs it) so
+   * `client-gateway`'s `ChatEventsConsumer` can resolve where to send the
+   * "new reply" email -- `null` when the Requester never captured one. */
+  contactEmail: string | null;
 }
 
 /**
@@ -45,6 +50,7 @@ export class GetTicketByIdHandler
       subject: ticket.subject,
       description: ticket.description,
       status: ticket.status,
+      contactEmail: ticket.contactEmail,
     };
   }
 }

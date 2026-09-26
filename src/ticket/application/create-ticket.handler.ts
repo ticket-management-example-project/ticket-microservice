@@ -30,6 +30,7 @@ export interface CreateTicketResult {
   description: string;
   status: string;
   trackingToken: string;
+  contactEmail: string | null;
 }
 
 /**
@@ -94,6 +95,7 @@ export class CreateTicketHandler
         tenantId: tenant.id,
         subject: command.subject,
         description: command.description,
+        contactEmail: command.contactEmail,
       }),
     );
 
@@ -112,6 +114,7 @@ export class CreateTicketHandler
         subject: ticket.subject,
         description: ticket.description,
         status: ticket.status,
+        contactEmail: ticket.contactEmail,
       },
     };
     const tokenIssuedEnvelope = {
@@ -147,6 +150,7 @@ export class CreateTicketHandler
           ticket.subject,
           ticket.description,
           occurredAt,
+          ticket.contactEmail,
         ),
         tx,
       );
@@ -180,6 +184,7 @@ export class CreateTicketHandler
       description: ticket.description,
       status: ticket.status,
       trackingToken: ticket.trackingToken as string,
+      contactEmail: ticket.contactEmail,
     };
   }
 }

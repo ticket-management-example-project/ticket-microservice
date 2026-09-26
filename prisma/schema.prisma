@@ -45,6 +45,10 @@ model TicketReadModel {
   // id column in this table (see migrations/002-ticket-requester.sql).
   // `null` until `linkToAccount()` links this Ticket to an account.
   requesterId   String?  @map("requester_id")
+  // Story 3.2: optional Requester contact channel captured at creation,
+  // used by client-gateway to resolve where to send the "new reply" email
+  // (see migrations/003-ticket-contact-email.sql). `null` until captured.
+  contactEmail  String?  @map("contact_email")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @default(now()) @map("updated_at")
 

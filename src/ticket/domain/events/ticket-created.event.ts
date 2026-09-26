@@ -13,5 +13,12 @@ export class TicketCreatedEvent {
     public readonly subject: string,
     public readonly description: string,
     public readonly occurredAt: string,
+    /** Story 3.2: optional Requester contact channel, captured at creation
+     * for FR-18's "canal disponible al crear el Ticket" branch -- `null`
+     * when the Requester didn't provide one. Appended last (not grouped with
+     * subject/description) to keep every existing positional call of this
+     * constructor's first five args unchanged in spirit; every call site is
+     * still updated explicitly. */
+    public readonly contactEmail: string | null = null,
   ) {}
 }
