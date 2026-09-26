@@ -41,8 +41,13 @@ model TicketReadModel {
   description   String
   status        String
   trackingToken String?  @unique @map("tracking_token")
+  // Story 2.2: Clerk User id (`sub` claim) -- a String, unlike every other
+  // id column in this table (see migrations/002-ticket-requester.sql).
+  // `null` until `linkToAccount()` links this Ticket to an account.
+  requesterId   String?  @map("requester_id")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @default(now()) @map("updated_at")
 
+  @@index([tenantId, requesterId], map: "idx_ticket_read_model_tenant_requester")
   @@map("ticket_read_model")
 }

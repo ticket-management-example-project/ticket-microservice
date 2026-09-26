@@ -1,5 +1,7 @@
 import { CreateTicketCommand } from './application/create-ticket.command';
 import { GetTicketByTokenQuery } from './application/get-ticket-by-token.query';
+import { LinkTicketToAccountCommand } from './application/link-ticket-to-account.command';
+import { GetTicketsByRequesterQuery } from './application/get-tickets-by-requester.query';
 import { TicketController } from './ticket.controller';
 
 describe('TicketController', () => {
@@ -63,5 +65,33 @@ describe('TicketController', () => {
       new GetTicketByTokenQuery('abc123'),
     );
     expect(result.chatThread).toEqual([]);
+  });
+
+  it('link_ticket_to_account dispatches LinkTicketToAccountCommand with the token/requesterId/correlationId', async () => {
+    const { controller, commandBus } = makeController();
+
+    await controller.linkTicketToAccount({
+      token: 'abc123',
+      requesterId: 'user_1',
+      correlationId: 'corr-1',
+    });
+
+    expect(commandBus.execute).toHaveBeenCalledWith(
+      new LinkTicketToAccountCommand('abc123', 'user_1', 'corr-1'),
+    );
+  });
+
+  it('get_tickets_by_requester dispatches GetTicketsByRequesterQuery with the tenantSlug/requesterId/correlationId', async () => {
+    const { controller, queryBus } = makeController();
+
+    await controller.getTicketsByRequester({
+      tenantSlug: 'soporte',
+      requesterId: 'user_1',
+      correlationId: 'corr-2',
+    });
+
+    expect(queryBus.execute).toHaveBeenCalledWith(
+      new GetTicketsByRequesterQuery('soporte', 'user_1', 'corr-2'),
+    );
   });
 });

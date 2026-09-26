@@ -1,4 +1,5 @@
 import { InvalidTicketException } from './exceptions/invalid-ticket.exception';
+import { TicketAlreadyLinkedException } from './exceptions/ticket-already-linked.exception';
 import { Ticket } from './ticket.aggregate';
 
 describe('Ticket', () => {
@@ -76,5 +77,65 @@ describe('Ticket', () => {
     // Creation fields are untouched by issuing the token.
     expect(ticket.status).toBe('open');
     expect(ticket.subject).toBe('Asunto');
+  });
+
+  it('a newly created Ticket has no requesterId', () => {
+    const ticket = Ticket.create({
+      id: '1',
+      tenantId: 't-1',
+      subject: 'Asunto',
+      description: 'Descripción',
+    });
+
+    expect(ticket.requesterId).toBeNull();
+  });
+
+  describe('hydrate() + linkToAccount()', () => {
+    const hydrateUnlinked = (requesterId: string | null = null) =>
+      Ticket.hydrate({
+        id: '1',
+        tenantId: 't-1',
+        subject: 'Asunto',
+        description: 'Descripción',
+        status: 'open',
+        trackingToken: 'abc123',
+        requesterId,
+      });
+
+    it('hydrate() sets trackingToken from its props instead of hardcoding null', () => {
+      const ticket = hydrateUnlinked(null);
+
+      expect(ticket.trackingToken).toBe('abc123');
+    });
+
+    it('links an unlinked Ticket to a Requester, applying TicketRequesterLinkedEvent', () => {
+      const ticket = hydrateUnlinked(null);
+
+      const linked = ticket.linkToAccount('user_1');
+
+      expect(linked).toBe(true);
+      expect(ticket.requesterId).toBe('user_1');
+      expect(ticket.getUncommittedEvents()).toHaveLength(1);
+    });
+
+    it('is idempotent when already linked to the SAME requesterId -- no event reapplied', () => {
+      const ticket = hydrateUnlinked('user_1');
+
+      const linked = ticket.linkToAccount('user_1');
+
+      expect(linked).toBe(false);
+      expect(ticket.requesterId).toBe('user_1');
+      expect(ticket.getUncommittedEvents()).toHaveLength(0);
+    });
+
+    it('throws TicketAlreadyLinkedException when linked to a DIFFERENT requesterId, leaving state untouched', () => {
+      const ticket = hydrateUnlinked('user_1');
+
+      expect(() => ticket.linkToAccount('user_2')).toThrow(
+        TicketAlreadyLinkedException,
+      );
+      expect(ticket.requesterId).toBe('user_1');
+      expect(ticket.getUncommittedEvents()).toHaveLength(0);
+    });
   });
 });
