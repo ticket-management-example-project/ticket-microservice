@@ -2,6 +2,8 @@ import { CreateTicketCommand } from './application/create-ticket.command';
 import { GetTicketByTokenQuery } from './application/get-ticket-by-token.query';
 import { LinkTicketToAccountCommand } from './application/link-ticket-to-account.command';
 import { GetTicketsByRequesterQuery } from './application/get-tickets-by-requester.query';
+import { GetTicketByIdQuery } from './application/get-ticket-by-id.query';
+import { VerifyTrackingTokenQuery } from './application/verify-tracking-token.query';
 import { TicketController } from './ticket.controller';
 
 describe('TicketController', () => {
@@ -92,6 +94,26 @@ describe('TicketController', () => {
 
     expect(queryBus.execute).toHaveBeenCalledWith(
       new GetTicketsByRequesterQuery('soporte', 'user_1', 'corr-2'),
+    );
+  });
+
+  it('get_ticket_by_id dispatches GetTicketByIdQuery with the id/correlationId', async () => {
+    const { controller, queryBus } = makeController();
+
+    await controller.getTicketById({ id: '1', correlationId: 'corr-3' });
+
+    expect(queryBus.execute).toHaveBeenCalledWith(
+      new GetTicketByIdQuery('1', 'corr-3'),
+    );
+  });
+
+  it('verify_tracking_token dispatches VerifyTrackingTokenQuery with the token', async () => {
+    const { controller, queryBus } = makeController();
+
+    await controller.verifyTrackingToken({ token: 'abc123' });
+
+    expect(queryBus.execute).toHaveBeenCalledWith(
+      new VerifyTrackingTokenQuery('abc123'),
     );
   });
 });

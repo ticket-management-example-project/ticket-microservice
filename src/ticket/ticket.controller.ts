@@ -11,10 +11,14 @@ import { CreateTicketCommand } from './application/create-ticket.command';
 import { GetTicketByTokenQuery } from './application/get-ticket-by-token.query';
 import { LinkTicketToAccountCommand } from './application/link-ticket-to-account.command';
 import { GetTicketsByRequesterQuery } from './application/get-tickets-by-requester.query';
+import { GetTicketByIdQuery } from './application/get-ticket-by-id.query';
+import { VerifyTrackingTokenQuery } from './application/verify-tracking-token.query';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { GetTicketByTokenDto } from './dto/get-ticket-by-token.dto';
 import { LinkTicketToAccountDto } from './dto/link-ticket-to-account.dto';
 import { GetTicketsByRequesterDto } from './dto/get-tickets-by-requester.dto';
+import { GetTicketByIdDto } from './dto/get-ticket-by-id.dto';
+import { VerifyTrackingTokenDto } from './dto/verify-tracking-token.dto';
 
 /** Replaces the placeholder scaffold (`ticket.controller.ts`/
  * `ticket.service.ts`, `find_one_ticket` stub) -- spec Boundaries &
@@ -73,5 +77,28 @@ export class TicketController {
         dto.correlationId,
       ),
     );
+  }
+
+  /** Story 3.1: service-to-service lookup by aggregate id --
+   * `chat-microservice`'s `TicketClient` (existence + `tenantId` check
+   * before a `ChatThread` may exist) and `client-gateway`'s agent-side
+   * ticket detail endpoint. Returns `null` (not a thrown exception) for "no
+   * such id" -- same convention as `find_tenant_by_slug`, the caller decides
+   * how to surface that. */
+  @MessagePattern({ cmd: 'get_ticket_by_id' })
+  @UsePipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }))
+  async getTicketById(@Payload() dto: GetTicketByIdDto) {
+    return this.queryBus.execute(
+      new GetTicketByIdQuery(dto.id, dto.correlationId),
+    );
+  }
+
+  /** Story 3.1: exposes `TrackingTokenProvider.verify()` over NATS for
+   * `client-gateway`'s `ChatGateway` (Requester branch of the socket's dual
+   * auth, spec Design Notes). */
+  @MessagePattern({ cmd: 'verify_tracking_token' })
+  @UsePipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }))
+  async verifyTrackingToken(@Payload() dto: VerifyTrackingTokenDto) {
+    return this.queryBus.execute(new VerifyTrackingTokenQuery(dto.token));
   }
 }
