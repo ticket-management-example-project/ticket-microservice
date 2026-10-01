@@ -33,9 +33,7 @@ describe('LinkTicketToAccountHandler', () => {
 
     const projection = {
       findById,
-      claimRequester: jest
-        .fn()
-        .mockResolvedValue(overrides?.claimed ?? true),
+      claimRequester: jest.fn().mockResolvedValue(overrides?.claimed ?? true),
       handle: jest.fn().mockResolvedValue(undefined),
     };
     const eventsRepository = {
@@ -126,10 +124,7 @@ describe('LinkTicketToAccountHandler', () => {
       // First read (pre-race) still shows unlinked; the claim then reports
       // it lost, and the re-read reveals it was already linked to the SAME
       // account by the time it ran.
-      findByIdResults: [
-        baseTicket,
-        { ...baseTicket, requesterId: 'user_1' },
-      ],
+      findByIdResults: [baseTicket, { ...baseTicket, requesterId: 'user_1' }],
       claimed: false,
     });
 
@@ -144,10 +139,7 @@ describe('LinkTicketToAccountHandler', () => {
 
   it('throws TicketAlreadyLinkedException when the atomic claim loses to a DIFFERENT account, persisting nothing', async () => {
     const { handler, eventsRepository, projection } = makeHandler({
-      findByIdResults: [
-        baseTicket,
-        { ...baseTicket, requesterId: 'user_2' },
-      ],
+      findByIdResults: [baseTicket, { ...baseTicket, requesterId: 'user_2' }],
       claimed: false,
     });
 
