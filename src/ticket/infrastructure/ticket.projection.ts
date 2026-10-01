@@ -5,6 +5,7 @@ import { PrismaClient, Prisma } from 'src/generated/prisma/client';
 import { TicketCreatedEvent } from '../domain/events/ticket-created.event';
 import { TicketTrackingTokenIssuedEvent } from '../domain/events/ticket-tracking-token-issued.event';
 import { TicketRequesterLinkedEvent } from '../domain/events/ticket-requester-linked.event';
+import { TicketTriagedEvent } from '../domain/events/ticket-triaged.event';
 
 export interface TicketReadModel {
   id: string;
@@ -19,6 +20,12 @@ export interface TicketReadModel {
   /** Story 3.2: optional Requester contact channel, `null` when not
    * captured at creation. */
   contactEmail: string | null;
+  /** Story 5.1: Epic 5's automatic triage, `null` until `TicketTriaged` is
+   * applied (`handleTriaged()`/`claimTriage()`). */
+  categoryId: string | null;
+  priority: string | null;
+  suggestedAgentId: string | null;
+  routedTo: string | null;
   createdAt: string;
 }
 
@@ -26,7 +33,8 @@ type PrismaQueryable = Pick<PrismaClient, '$queryRaw' | '$executeRaw'>;
 type TicketDomainEvent =
   | TicketCreatedEvent
   | TicketTrackingTokenIssuedEvent
-  | TicketRequesterLinkedEvent;
+  | TicketRequesterLinkedEvent
+  | TicketTriagedEvent;
 
 /**
  * Read-side projection for `Ticket`, kept in sync by `@EventsHandler`.
@@ -46,6 +54,7 @@ type TicketDomainEvent =
   TicketCreatedEvent,
   TicketTrackingTokenIssuedEvent,
   TicketRequesterLinkedEvent,
+  TicketTriagedEvent,
 )
 export class TicketProjection implements IEventHandler<TicketDomainEvent> {
   constructor(@Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient) {}
@@ -69,6 +78,9 @@ export class TicketProjection implements IEventHandler<TicketDomainEvent> {
     }
     if (event instanceof TicketTrackingTokenIssuedEvent) {
       return this.handleTokenIssued(event, client);
+    }
+    if (event instanceof TicketTriagedEvent) {
+      return this.handleTriaged(event, client);
     }
     return this.handleRequesterLinked(event, client);
   }
@@ -113,6 +125,52 @@ export class TicketProjection implements IEventHandler<TicketDomainEvent> {
     );
   }
 
+  /** Replay path (double-dispatch via `ticket.commit()`/`@EventsHandler`) for
+   * `TicketTriagedEvent` -- a plain, non-atomic `UPDATE` by id. The ATOMIC
+   * claim-guard-and-write used by `ApplyTicketTriageHandler` itself is
+   * `claimTriage()` below; this method exists only for the general replay
+   * precedent every other event in this projection follows. */
+  private async handleTriaged(
+    event: TicketTriagedEvent,
+    client: PrismaQueryable,
+  ): Promise<void> {
+    const status =
+      event.routedTo === 'human_queue' ? 'queued' : 'auto_resolving';
+    await client.$executeRaw(
+      Prisma.sql`UPDATE ticket_read_model
+       SET category_id = ${event.categoryId}::bigint, priority = ${event.priority}, suggested_agent_id = ${event.suggestedAgentId}::bigint, routed_to = ${event.routedTo}, status = ${status}, updated_at = ${event.occurredAt}::timestamptz
+       WHERE id = ${event.aggregateId}::bigint`,
+    );
+  }
+
+  /**
+   * `ApplyTicketTriageHandler`'s atomic guard AND write for `TicketTriaged`
+   * (Story 5.1), same "guard and write in ONE statement under the row lock"
+   * discipline as `claimRequester()` -- idempotency against Kafka's
+   * at-least-once redelivery (spec Boundaries & Constraints: "redelivery ...
+   * no debe duplicar TriageDecision") is enforced here, not by an in-memory
+   * read. Returns `true` only when THIS call performed the transition.
+   */
+  async claimTriage(
+    id: string,
+    props: {
+      categoryId: string | null;
+      priority: string | null;
+      suggestedAgentId: string | null;
+      routedTo: string;
+      status: string;
+    },
+    occurredAt: string,
+    client: PrismaQueryable,
+  ): Promise<boolean> {
+    const affectedRows = await client.$executeRaw(
+      Prisma.sql`UPDATE ticket_read_model
+       SET category_id = ${props.categoryId}::bigint, priority = ${props.priority}, suggested_agent_id = ${props.suggestedAgentId}::bigint, routed_to = ${props.routedTo}, status = ${props.status}, updated_at = ${occurredAt}::timestamptz
+       WHERE id = ${id}::bigint AND routed_to IS NULL`,
+    );
+    return affectedRows === 1;
+  }
+
   /**
    * `LinkTicketToAccountHandler`'s atomic guard AND write, combined into one
    * statement so the decision can never race: `requester_id IS NULL` is
@@ -145,7 +203,7 @@ export class TicketProjection implements IEventHandler<TicketDomainEvent> {
 
   async findById(id: string): Promise<TicketReadModel | null> {
     const rows = await this.prisma.$queryRaw<RawTicketRow[]>(
-      Prisma.sql`SELECT id, tenant_id, subject, description, status, tracking_token, requester_id, contact_email, created_at
+      Prisma.sql`SELECT id, tenant_id, subject, description, status, tracking_token, requester_id, contact_email, category_id, priority, suggested_agent_id, routed_to, created_at
        FROM ticket_read_model
        WHERE id = ${id}::bigint`,
     );
@@ -158,7 +216,7 @@ export class TicketProjection implements IEventHandler<TicketDomainEvent> {
    * token->ticket association only lives in this projection. */
   async findByTrackingToken(token: string): Promise<TicketReadModel | null> {
     const rows = await this.prisma.$queryRaw<RawTicketRow[]>(
-      Prisma.sql`SELECT id, tenant_id, subject, description, status, tracking_token, requester_id, contact_email, created_at
+      Prisma.sql`SELECT id, tenant_id, subject, description, status, tracking_token, requester_id, contact_email, category_id, priority, suggested_agent_id, routed_to, created_at
        FROM ticket_read_model
        WHERE tracking_token = ${token}`,
     );
@@ -176,7 +234,7 @@ export class TicketProjection implements IEventHandler<TicketDomainEvent> {
     tenantId: string,
   ): Promise<TicketReadModel[]> {
     const rows = await this.prisma.$queryRaw<RawTicketRow[]>(
-      Prisma.sql`SELECT id, tenant_id, subject, description, status, tracking_token, requester_id, contact_email, created_at
+      Prisma.sql`SELECT id, tenant_id, subject, description, status, tracking_token, requester_id, contact_email, category_id, priority, suggested_agent_id, routed_to, created_at
        FROM ticket_read_model
        WHERE requester_id = ${requesterId} AND tenant_id = ${tenantId}::bigint
        ORDER BY created_at DESC`,
@@ -194,6 +252,11 @@ export class TicketProjection implements IEventHandler<TicketDomainEvent> {
       trackingToken: row.tracking_token,
       requesterId: row.requester_id,
       contactEmail: row.contact_email ?? null,
+      categoryId: row.category_id != null ? String(row.category_id) : null,
+      priority: row.priority ?? null,
+      suggestedAgentId:
+        row.suggested_agent_id != null ? String(row.suggested_agent_id) : null,
+      routedTo: row.routed_to ?? null,
       createdAt:
         row.created_at instanceof Date
           ? row.created_at.toISOString()
@@ -205,6 +268,10 @@ export class TicketProjection implements IEventHandler<TicketDomainEvent> {
 interface RawTicketRow {
   id: string | bigint;
   tenant_id: string | bigint;
+  category_id: string | bigint | null;
+  priority: string | null;
+  suggested_agent_id: string | bigint | null;
+  routed_to: string | null;
   subject: string;
   description: string;
   status: string;

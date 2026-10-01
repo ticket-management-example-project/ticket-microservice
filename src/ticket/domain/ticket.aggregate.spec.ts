@@ -174,4 +174,83 @@ describe('Ticket', () => {
       expect(ticket.getUncommittedEvents()).toHaveLength(0);
     });
   });
+
+  describe('applyTriage()', () => {
+    const hydrateUntriaged = () =>
+      Ticket.hydrate({
+        id: '1',
+        tenantId: 't-1',
+        subject: 'Asunto',
+        description: 'Descripción',
+        status: 'open',
+        trackingToken: 'abc123',
+        requesterId: null,
+      });
+
+    it('a newly created Ticket has no triage fields', () => {
+      const ticket = Ticket.create({
+        id: '1',
+        tenantId: 't-1',
+        subject: 'Asunto',
+        description: 'Descripción',
+      });
+
+      expect(ticket.categoryId).toBeNull();
+      expect(ticket.priority).toBeNull();
+      expect(ticket.suggestedAgentId).toBeNull();
+      expect(ticket.routedTo).toBeNull();
+    });
+
+    it('routed_to "auto_resolution" sets status to "auto_resolving"', () => {
+      const ticket = hydrateUntriaged();
+
+      ticket.applyTriage({
+        categoryId: 'cat-1',
+        priority: 'alta',
+        suggestedAgentId: 'agent-1',
+        routedTo: 'auto_resolution',
+        occurredAt: '2026-01-01T00:00:03.000Z',
+      });
+
+      expect(ticket.categoryId).toBe('cat-1');
+      expect(ticket.priority).toBe('alta');
+      expect(ticket.suggestedAgentId).toBe('agent-1');
+      expect(ticket.routedTo).toBe('auto_resolution');
+      expect(ticket.status).toBe('auto_resolving');
+      expect(ticket.getUncommittedEvents()).toHaveLength(1);
+    });
+
+    it('routed_to "human_queue" sets status to "queued"', () => {
+      const ticket = hydrateUntriaged();
+
+      ticket.applyTriage({
+        categoryId: 'cat-1',
+        priority: 'media',
+        suggestedAgentId: null,
+        routedTo: 'human_queue',
+        occurredAt: '2026-01-01T00:00:03.000Z',
+      });
+
+      expect(ticket.routedTo).toBe('human_queue');
+      expect(ticket.status).toBe('queued');
+    });
+
+    it('a degraded triage (every field null) still routes to the human queue', () => {
+      const ticket = hydrateUntriaged();
+
+      ticket.applyTriage({
+        categoryId: null,
+        priority: null,
+        suggestedAgentId: null,
+        routedTo: 'human_queue',
+        occurredAt: '2026-01-01T00:00:03.000Z',
+      });
+
+      expect(ticket.categoryId).toBeNull();
+      expect(ticket.priority).toBeNull();
+      expect(ticket.suggestedAgentId).toBeNull();
+      expect(ticket.routedTo).toBe('human_queue');
+      expect(ticket.status).toBe('queued');
+    });
+  });
 });

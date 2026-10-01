@@ -49,6 +49,13 @@ model TicketReadModel {
   // used by client-gateway to resolve where to send the "new reply" email
   // (see migrations/003-ticket-contact-email.sql). `null` until captured.
   contactEmail  String?  @map("contact_email")
+  // Story 5.1: Epic 5's automatic triage outcome (see
+  // migrations/004-ticket-triage-fields.sql) -- all four `null` until
+  // `TicketTriaged` is consumed.
+  categoryId    BigInt?  @map("category_id")
+  priority      String?
+  suggestedAgentId BigInt? @map("suggested_agent_id")
+  routedTo      String?  @map("routed_to")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @default(now()) @map("updated_at")
 

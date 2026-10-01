@@ -4,8 +4,20 @@ import { TicketAlreadyLinkedException } from './exceptions/ticket-already-linked
 import { TicketCreatedEvent } from './events/ticket-created.event';
 import { TicketTrackingTokenIssuedEvent } from './events/ticket-tracking-token-issued.event';
 import { TicketRequesterLinkedEvent } from './events/ticket-requester-linked.event';
+import {
+  TicketPriority,
+  TicketRouting,
+  TicketTriagedEvent,
+} from './events/ticket-triaged.event';
 
-export type TicketStatus = 'open';
+/**
+ * `'queued'`/`'auto_resolving'` are Story 5.1's two triage-routing outcomes
+ * (`applyTriage()`) -- `'queued'` still renders as the `open` status-pill
+ * variant until a human agent claims it (Story 5.2, `progress`); the UI never
+ * surfaces either of these two literally (Never: "no se toca la UI de
+ * cola/triage" -- Story 5.2). `'auto_resolving'` is Epic 6's entry point.
+ */
+export type TicketStatus = 'open' | 'queued' | 'auto_resolving';
 
 const MAX_SUBJECT_LENGTH = 300;
 const MAX_DESCRIPTION_LENGTH = 10000;
@@ -38,6 +50,10 @@ export class Ticket extends AggregateRoot {
   private _trackingToken: string | null;
   private _requesterId: string | null;
   private _contactEmail: string | null;
+  private _categoryId: string | null;
+  private _priority: TicketPriority | null;
+  private _suggestedAgentId: string | null;
+  private _routedTo: TicketRouting | null;
 
   static create(props: {
     id: string;
@@ -126,6 +142,14 @@ export class Ticket extends AggregateRoot {
      * only caller today) doesn't touch contactEmail, so it seeds `null` when
      * omitted rather than requiring every call site to plumb it through. */
     contactEmail?: string | null;
+    /** Story 5.1: optional, like `contactEmail` -- `LinkTicketToAccountHandler`
+     * (today's only caller) never touches triage fields, so every one of
+     * these seeds `null` when omitted rather than requiring that call site to
+     * plumb them through. */
+    categoryId?: string | null;
+    priority?: TicketPriority | null;
+    suggestedAgentId?: string | null;
+    routedTo?: TicketRouting | null;
   }): Ticket {
     const ticket = new Ticket();
     ticket._id = props.id;
@@ -136,6 +160,10 @@ export class Ticket extends AggregateRoot {
     ticket._trackingToken = props.trackingToken;
     ticket._requesterId = props.requesterId;
     ticket._contactEmail = props.contactEmail ?? null;
+    ticket._categoryId = props.categoryId ?? null;
+    ticket._priority = props.priority ?? null;
+    ticket._suggestedAgentId = props.suggestedAgentId ?? null;
+    ticket._routedTo = props.routedTo ?? null;
     return ticket;
   }
 
@@ -168,6 +196,36 @@ export class Ticket extends AggregateRoot {
     return true;
   }
 
+  /**
+   * Applies Epic 5's automatic triage decision onto this Ticket (Story 5.1)
+   * -- category/priority/agente sugerido plus the routing outcome
+   * (`'human_queue'` cola de agentes, o `'auto_resolution'` Epic 6).
+   * Idempotency against at-least-once Kafka redelivery of `TicketTriaged` is
+   * enforced BEFORE this is ever called (see
+   * `TicketProjection.claimTriage()`'s atomic `WHERE routed_to IS NULL`
+   * guard, `ApplyTicketTriageHandler`'s only caller of this method) -- this
+   * method itself carries no further guard, same division of responsibility
+   * as `linkToAccount()`/`claimRequester()`.
+   */
+  applyTriage(props: {
+    categoryId: string | null;
+    priority: TicketPriority | null;
+    suggestedAgentId: string | null;
+    routedTo: TicketRouting;
+    occurredAt: string;
+  }): void {
+    this.apply(
+      new TicketTriagedEvent(
+        this._id,
+        props.categoryId,
+        props.priority,
+        props.suggestedAgentId,
+        props.routedTo,
+        props.occurredAt,
+      ),
+    );
+  }
+
   onTicketCreatedEvent(event: TicketCreatedEvent) {
     this._id = event.aggregateId;
     this._tenantId = event.tenantId;
@@ -177,6 +235,10 @@ export class Ticket extends AggregateRoot {
     this._trackingToken = null;
     this._requesterId = null;
     this._contactEmail = event.contactEmail ?? null;
+    this._categoryId = null;
+    this._priority = null;
+    this._suggestedAgentId = null;
+    this._routedTo = null;
   }
 
   onTicketTrackingTokenIssuedEvent(event: TicketTrackingTokenIssuedEvent) {
@@ -185,6 +247,20 @@ export class Ticket extends AggregateRoot {
 
   onTicketRequesterLinkedEvent(event: TicketRequesterLinkedEvent) {
     this._requesterId = event.requesterId;
+  }
+
+  onTicketTriagedEvent(event: TicketTriagedEvent) {
+    this._categoryId = event.categoryId;
+    this._priority = event.priority;
+    this._suggestedAgentId = event.suggestedAgentId;
+    this._routedTo = event.routedTo;
+    // Explicit on the MORE consequential state (`auto_resolution` -> Epic
+    // 6's entry point) rather than defaulting to it -- an unknown/malformed
+    // `routedTo` (should never happen: `TicketTriagedConsumer` validates it
+    // before dispatching `ApplyTicketTriageCommand`) falls back to the safer
+    // `'queued'` (human queue), never silently to auto-resolution.
+    this._status =
+      event.routedTo === 'auto_resolution' ? 'auto_resolving' : 'queued';
   }
 
   get id(): string {
@@ -217,5 +293,21 @@ export class Ticket extends AggregateRoot {
 
   get contactEmail(): string | null {
     return this._contactEmail;
+  }
+
+  get categoryId(): string | null {
+    return this._categoryId;
+  }
+
+  get priority(): TicketPriority | null {
+    return this._priority;
+  }
+
+  get suggestedAgentId(): string | null {
+    return this._suggestedAgentId;
+  }
+
+  get routedTo(): TicketRouting | null {
+    return this._routedTo;
   }
 }

@@ -1,6 +1,7 @@
 import { TicketCreatedEvent } from '../domain/events/ticket-created.event';
 import { TicketTrackingTokenIssuedEvent } from '../domain/events/ticket-tracking-token-issued.event';
 import { TicketRequesterLinkedEvent } from '../domain/events/ticket-requester-linked.event';
+import { TicketTriagedEvent } from '../domain/events/ticket-triaged.event';
 import { TicketProjection } from './ticket.projection';
 
 describe('TicketProjection', () => {
@@ -138,8 +139,39 @@ describe('TicketProjection', () => {
       trackingToken: 'abc123',
       requesterId: undefined,
       contactEmail: null,
+      categoryId: null,
+      priority: null,
+      suggestedAgentId: null,
+      routedTo: null,
       createdAt: '2026-01-01T00:00:00.000Z',
     });
+  });
+
+  it('findById converts populated category_id/suggested_agent_id BigInts to strings', async () => {
+    const { prisma } = makePrisma();
+    prisma.$queryRaw = jest.fn().mockResolvedValue([
+      {
+        id: '1',
+        tenant_id: 't-1',
+        subject: 'Asunto',
+        description: 'Descripción',
+        status: 'auto_resolving',
+        tracking_token: 'abc123',
+        category_id: 123n,
+        priority: 'alta',
+        suggested_agent_id: 456n,
+        routed_to: 'auto_resolution',
+        created_at: '2026-01-01T00:00:00.000Z',
+      },
+    ]);
+    const projection = new TicketProjection(prisma as any);
+
+    const result = await projection.findById('1');
+
+    expect(result?.categoryId).toBe('123');
+    expect(result?.priority).toBe('alta');
+    expect(result?.suggestedAgentId).toBe('456');
+    expect(result?.routedTo).toBe('auto_resolution');
   });
 
   it('findById returns null when no row matches', async () => {
@@ -282,6 +314,10 @@ describe('TicketProjection', () => {
         trackingToken: 'abc123',
         requesterId: 'user_1',
         contactEmail: null,
+        categoryId: null,
+        priority: null,
+        suggestedAgentId: null,
+        routedTo: null,
         createdAt: '2026-01-01T00:00:00.000Z',
       },
     ]);
@@ -305,5 +341,113 @@ describe('TicketProjection', () => {
     await expect(
       projection.findByRequesterId('user_missing', 't-1'),
     ).resolves.toEqual([]);
+  });
+
+  it('handle(TicketTriaged) updates the triage fields and derives status "auto_resolving"', async () => {
+    const { prisma, txClient } = makePrisma();
+    const projection = new TicketProjection(prisma as any);
+    const triagedEvent = new TicketTriagedEvent(
+      '1',
+      'cat-1',
+      'alta',
+      'agent-1',
+      'auto_resolution',
+      '2026-01-01T00:00:03.000Z',
+    );
+
+    await projection.handle(triagedEvent);
+
+    expect(txClient.$executeRaw).toHaveBeenCalledTimes(1);
+    const [sqlFragment] = txClient.$executeRaw.mock.calls[0];
+    expect(sqlFragment.strings.join('')).toContain('UPDATE ticket_read_model');
+    expect(sqlFragment.values).toEqual([
+      'cat-1',
+      'alta',
+      'agent-1',
+      'auto_resolution',
+      'auto_resolving',
+      '2026-01-01T00:00:03.000Z',
+      '1',
+    ]);
+  });
+
+  it('handle(TicketTriaged) derives status "queued" when routed to the human queue', async () => {
+    const { prisma, txClient } = makePrisma();
+    const projection = new TicketProjection(prisma as any);
+    const triagedEvent = new TicketTriagedEvent(
+      '1',
+      null,
+      null,
+      null,
+      'human_queue',
+      '2026-01-01T00:00:03.000Z',
+    );
+
+    await projection.handle(triagedEvent);
+
+    const [sqlFragment] = txClient.$executeRaw.mock.calls[0];
+    expect(sqlFragment.values).toEqual([
+      null,
+      null,
+      null,
+      'human_queue',
+      'queued',
+      '2026-01-01T00:00:03.000Z',
+      '1',
+    ]);
+  });
+
+  it('claimTriage runs an atomic UPDATE guarded by routed_to IS NULL, and returns true when it matches a row', async () => {
+    const { txClient } = makePrisma();
+    txClient.$executeRaw = jest.fn().mockResolvedValue(1);
+    const projection = new TicketProjection({} as any);
+
+    const claimed = await projection.claimTriage(
+      '1',
+      {
+        categoryId: 'cat-1',
+        priority: 'alta',
+        suggestedAgentId: 'agent-1',
+        routedTo: 'auto_resolution',
+        status: 'auto_resolving',
+      },
+      '2026-01-01T00:00:03.000Z',
+      txClient,
+    );
+
+    expect(claimed).toBe(true);
+    const [sqlFragment] = txClient.$executeRaw.mock.calls[0];
+    expect(sqlFragment.strings.join('')).toContain('UPDATE ticket_read_model');
+    expect(sqlFragment.strings.join('')).toContain('routed_to IS NULL');
+    expect(sqlFragment.values).toEqual([
+      'cat-1',
+      'alta',
+      'agent-1',
+      'auto_resolution',
+      'auto_resolving',
+      '2026-01-01T00:00:03.000Z',
+      '1',
+    ]);
+  });
+
+  it('claimTriage returns false when no row matches (already triaged -- redelivery)', async () => {
+    const { txClient } = makePrisma();
+    txClient.$executeRaw = jest.fn().mockResolvedValue(0);
+    const projection = new TicketProjection({} as any);
+
+    const claimed = await projection.claimTriage(
+      '1',
+      {
+        categoryId: 'cat-1',
+        priority: 'alta',
+        suggestedAgentId: 'agent-1',
+        routedTo: 'auto_resolution',
+        status: 'auto_resolving',
+      },
+      '2026-01-01T00:00:03.000Z',
+      txClient,
+    );
+
+    expect(claimed).toBe(false);
   });
 });
