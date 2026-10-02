@@ -8,6 +8,9 @@ import { GetTicketsByRequesterHandler } from './application/get-tickets-by-reque
 import { GetTicketByIdHandler } from './application/get-ticket-by-id.handler';
 import { VerifyTrackingTokenHandler } from './application/verify-tracking-token.handler';
 import { ApplyTicketTriageHandler } from './application/apply-ticket-triage.handler';
+import { ConfirmTicketTriageHandler } from './application/confirm-ticket-triage.handler';
+import { CorrectTicketTriageHandler } from './application/correct-ticket-triage.handler';
+import { ListTicketsByTenantHandler } from './application/list-tickets-by-tenant.handler';
 import { EventsRepository } from './infrastructure/events.repository';
 import { TicketProjection } from './infrastructure/ticket.projection';
 import { CryptoTrackingTokenProvider } from './infrastructure/tracking-token.provider';
@@ -27,6 +30,9 @@ import { TicketController } from './ticket.controller';
     GetTicketByIdHandler,
     VerifyTrackingTokenHandler,
     ApplyTicketTriageHandler,
+    ConfirmTicketTriageHandler,
+    CorrectTicketTriageHandler,
+    ListTicketsByTenantHandler,
     EventsRepository,
     TicketProjection,
     TenantClient,

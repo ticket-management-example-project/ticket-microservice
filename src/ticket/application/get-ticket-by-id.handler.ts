@@ -14,6 +14,11 @@ export interface GetTicketByIdResult {
    * `client-gateway`'s `ChatEventsConsumer` can resolve where to send the
    * "new reply" email -- `null` when the Requester never captured one. */
   contactEmail: string | null;
+  /** Story 5.2: triage fields for the Agent Console's `card-triage`. */
+  categoryId: string | null;
+  priority: string | null;
+  suggestedAgentId: string | null;
+  triageReview: string | null;
 }
 
 /**
@@ -51,6 +56,10 @@ export class GetTicketByIdHandler
       description: ticket.description,
       status: ticket.status,
       contactEmail: ticket.contactEmail,
+      categoryId: ticket.categoryId,
+      priority: ticket.priority,
+      suggestedAgentId: ticket.suggestedAgentId,
+      triageReview: ticket.triageReview,
     };
   }
 }

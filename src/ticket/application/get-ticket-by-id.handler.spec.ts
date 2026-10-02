@@ -13,6 +13,10 @@ describe('GetTicketByIdHandler', () => {
         trackingToken: 'abc123',
         requesterId: null,
         contactEmail: 'maria@example.com',
+        categoryId: 'cat-1',
+        priority: 'alta',
+        suggestedAgentId: 'agent-1',
+        triageReview: 'confirmed',
       }),
     };
     const handler = new GetTicketByIdHandler(projection as any);
@@ -27,6 +31,10 @@ describe('GetTicketByIdHandler', () => {
       description: 'Descripción',
       status: 'open',
       contactEmail: 'maria@example.com',
+      categoryId: 'cat-1',
+      priority: 'alta',
+      suggestedAgentId: 'agent-1',
+      triageReview: 'confirmed',
     });
   });
 

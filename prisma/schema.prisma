@@ -56,6 +56,8 @@ model TicketReadModel {
   priority      String?
   suggestedAgentId BigInt? @map("suggested_agent_id")
   routedTo      String?  @map("routed_to")
+  // Story 5.2: 'confirmed' | 'corrected' (see migrations/005-ticket-triage-review.sql).
+  triageReview  String?  @map("triage_review")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @default(now()) @map("updated_at")
 

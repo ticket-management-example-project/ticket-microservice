@@ -18,6 +18,12 @@ import { GetTicketByTokenDto } from './dto/get-ticket-by-token.dto';
 import { LinkTicketToAccountDto } from './dto/link-ticket-to-account.dto';
 import { GetTicketsByRequesterDto } from './dto/get-tickets-by-requester.dto';
 import { GetTicketByIdDto } from './dto/get-ticket-by-id.dto';
+import { ConfirmTicketTriageCommand } from './application/confirm-ticket-triage.command';
+import { CorrectTicketTriageCommand } from './application/correct-ticket-triage.command';
+import { ListTicketsByTenantQuery } from './application/list-tickets-by-tenant.query';
+import { ConfirmTicketTriageDto } from './dto/confirm-ticket-triage.dto';
+import { CorrectTicketTriageDto } from './dto/correct-ticket-triage.dto';
+import { ListTicketsByTenantDto } from './dto/list-tickets-by-tenant.dto';
 import { VerifyTrackingTokenDto } from './dto/verify-tracking-token.dto';
 
 /** Replaces the placeholder scaffold (`ticket.controller.ts`/
@@ -101,5 +107,37 @@ export class TicketController {
   @UsePipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }))
   async verifyTrackingToken(@Payload() dto: VerifyTrackingTokenDto) {
     return this.queryBus.execute(new VerifyTrackingTokenQuery(dto.token));
+  }
+
+  /** Story 5.2: `client-gateway`'s `GET tenants/:tenantId/tickets` (the
+   * human queue). Membership is checked at the gateway. */
+  @MessagePattern({ cmd: 'list_tickets_by_tenant' })
+  @UsePipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }))
+  async listTicketsByTenant(@Payload() dto: ListTicketsByTenantDto) {
+    return this.queryBus.execute(new ListTicketsByTenantQuery(dto.tenantId));
+  }
+
+  /** Story 5.2: `POST tickets/:ticketId/triage/confirm`. */
+  @MessagePattern({ cmd: 'confirm_ticket_triage' })
+  @UsePipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }))
+  async confirmTicketTriage(@Payload() dto: ConfirmTicketTriageDto) {
+    return this.commandBus.execute(
+      new ConfirmTicketTriageCommand(dto.ticketId, dto.reviewedBy),
+    );
+  }
+
+  /** Story 5.2: `POST tickets/:ticketId/triage/correct`. */
+  @MessagePattern({ cmd: 'correct_ticket_triage' })
+  @UsePipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }))
+  async correctTicketTriage(@Payload() dto: CorrectTicketTriageDto) {
+    return this.commandBus.execute(
+      new CorrectTicketTriageCommand(
+        dto.ticketId,
+        dto.categoryId,
+        dto.priority,
+        dto.suggestedAgentId ?? null,
+        dto.reviewedBy,
+      ),
+    );
   }
 }

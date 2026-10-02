@@ -11,6 +11,16 @@ export interface TenantRecord {
   status: string;
 }
 
+export interface TenantCategoryRecord {
+  id: string;
+  isActive: boolean;
+}
+
+export interface TenantAgentRecord {
+  id: string;
+  status: string;
+}
+
 const RPC_TIMEOUT_MS = 5000;
 
 /**
@@ -30,6 +40,26 @@ export class TenantClient {
     return firstValueFrom(
       this.client
         .send<TenantRecord | null>({ cmd: 'find_tenant_by_slug' }, { slug })
+        .pipe(timeout(RPC_TIMEOUT_MS)),
+    );
+  }
+
+  /** Story 5.2: valida una corrección de triage contra las categorías del
+   * Tenant (`list_tenant_categories`, ya existente). */
+  async listCategories(tenantId: string): Promise<TenantCategoryRecord[]> {
+    return firstValueFrom(
+      this.client
+        .send<TenantCategoryRecord[]>({ cmd: 'list_tenant_categories' }, { tenantId })
+        .pipe(timeout(RPC_TIMEOUT_MS)),
+    );
+  }
+
+  /** Story 5.2: valida una corrección de triage contra los agentes del
+   * Tenant (`list_tenant_agents`, ya existente). */
+  async listAgents(tenantId: string): Promise<TenantAgentRecord[]> {
+    return firstValueFrom(
+      this.client
+        .send<TenantAgentRecord[]>({ cmd: 'list_tenant_agents' }, { tenantId })
         .pipe(timeout(RPC_TIMEOUT_MS)),
     );
   }

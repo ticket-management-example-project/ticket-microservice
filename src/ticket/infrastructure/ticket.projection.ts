@@ -6,6 +6,8 @@ import { TicketCreatedEvent } from '../domain/events/ticket-created.event';
 import { TicketTrackingTokenIssuedEvent } from '../domain/events/ticket-tracking-token-issued.event';
 import { TicketRequesterLinkedEvent } from '../domain/events/ticket-requester-linked.event';
 import { TicketTriagedEvent } from '../domain/events/ticket-triaged.event';
+import { TicketTriageConfirmedEvent } from '../domain/events/ticket-triage-confirmed.event';
+import { TicketTriageCorrectedEvent } from '../domain/events/ticket-triage-corrected.event';
 
 export interface TicketReadModel {
   id: string;
@@ -26,6 +28,8 @@ export interface TicketReadModel {
   priority: string | null;
   suggestedAgentId: string | null;
   routedTo: string | null;
+  /** Story 5.2: `null` hasta que un agente confirma/corrige. */
+  triageReview: string | null;
   createdAt: string;
 }
 
@@ -34,7 +38,9 @@ type TicketDomainEvent =
   | TicketCreatedEvent
   | TicketTrackingTokenIssuedEvent
   | TicketRequesterLinkedEvent
-  | TicketTriagedEvent;
+  | TicketTriagedEvent
+  | TicketTriageConfirmedEvent
+  | TicketTriageCorrectedEvent;
 
 /**
  * Read-side projection for `Ticket`, kept in sync by `@EventsHandler`.
@@ -55,6 +61,8 @@ type TicketDomainEvent =
   TicketTrackingTokenIssuedEvent,
   TicketRequesterLinkedEvent,
   TicketTriagedEvent,
+  TicketTriageConfirmedEvent,
+  TicketTriageCorrectedEvent,
 )
 export class TicketProjection implements IEventHandler<TicketDomainEvent> {
   constructor(@Inject(PRISMA_CLIENT) private readonly prisma: PrismaClient) {}
@@ -81,6 +89,12 @@ export class TicketProjection implements IEventHandler<TicketDomainEvent> {
     }
     if (event instanceof TicketTriagedEvent) {
       return this.handleTriaged(event, client);
+    }
+    if (event instanceof TicketTriageConfirmedEvent) {
+      return this.handleTriageConfirmed(event, client);
+    }
+    if (event instanceof TicketTriageCorrectedEvent) {
+      return this.handleTriageCorrected(event, client);
     }
     return this.handleRequesterLinked(event, client);
   }
@@ -138,7 +152,12 @@ export class TicketProjection implements IEventHandler<TicketDomainEvent> {
       event.routedTo === 'human_queue' ? 'queued' : 'auto_resolving';
     await client.$executeRaw(
       Prisma.sql`UPDATE ticket_read_model
-       SET category_id = ${event.categoryId}::bigint, priority = ${event.priority}, suggested_agent_id = ${event.suggestedAgentId}::bigint, routed_to = ${event.routedTo}, status = ${status}, updated_at = ${event.occurredAt}::timestamptz
+       SET category_id = CASE WHEN triage_review IS NULL THEN ${event.categoryId}::bigint ELSE category_id END,
+           priority = CASE WHEN triage_review IS NULL THEN ${event.priority} ELSE priority END,
+           suggested_agent_id = CASE WHEN triage_review IS NULL THEN ${event.suggestedAgentId}::bigint ELSE suggested_agent_id END,
+           routed_to = CASE WHEN triage_review IS NULL THEN ${event.routedTo} ELSE 'human_queue' END,
+           status = CASE WHEN triage_review IS NULL THEN ${status} ELSE 'queued' END,
+           updated_at = ${event.occurredAt}::timestamptz
        WHERE id = ${event.aggregateId}::bigint`,
     );
   }
@@ -165,7 +184,12 @@ export class TicketProjection implements IEventHandler<TicketDomainEvent> {
   ): Promise<boolean> {
     const affectedRows = await client.$executeRaw(
       Prisma.sql`UPDATE ticket_read_model
-       SET category_id = ${props.categoryId}::bigint, priority = ${props.priority}, suggested_agent_id = ${props.suggestedAgentId}::bigint, routed_to = ${props.routedTo}, status = ${props.status}, updated_at = ${occurredAt}::timestamptz
+       SET category_id = CASE WHEN triage_review IS NULL THEN ${props.categoryId}::bigint ELSE category_id END,
+           priority = CASE WHEN triage_review IS NULL THEN ${props.priority} ELSE priority END,
+           suggested_agent_id = CASE WHEN triage_review IS NULL THEN ${props.suggestedAgentId}::bigint ELSE suggested_agent_id END,
+           routed_to = CASE WHEN triage_review IS NULL THEN ${props.routedTo} ELSE 'human_queue' END,
+           status = CASE WHEN triage_review IS NULL THEN ${props.status} ELSE 'queued' END,
+           updated_at = ${occurredAt}::timestamptz
        WHERE id = ${id}::bigint AND routed_to IS NULL`,
     );
     return affectedRows === 1;
@@ -201,9 +225,86 @@ export class TicketProjection implements IEventHandler<TicketDomainEvent> {
     return affectedRows === 1;
   }
 
+  /** Story 5.2 replay path (double-dispatch via `ticket.commit()`) -- same
+   * guards as `claimTriageConfirmation()`/`writeTriageCorrection()`, so a
+   * replay can never overwrite a later human review. */
+  private async handleTriageConfirmed(
+    event: TicketTriageConfirmedEvent,
+    client: PrismaQueryable,
+  ): Promise<void> {
+    await this.claimTriageConfirmation(event.aggregateId, event.occurredAt, client);
+  }
+
+  private async handleTriageCorrected(
+    event: TicketTriageCorrectedEvent,
+    client: PrismaQueryable,
+  ): Promise<void> {
+    await this.writeTriageCorrection(
+      event.aggregateId,
+      {
+        categoryId: event.categoryId,
+        priority: event.priority,
+        suggestedAgentId: event.suggestedAgentId,
+      },
+      event.occurredAt,
+      client,
+    );
+  }
+
+  /** `ConfirmTicketTriageHandler`'s atomic guard AND write (Story 5.2): only
+   * a `queued`, suggested, never-reviewed Ticket transitions. `true` only
+   * when THIS call performed the transition. */
+  async claimTriageConfirmation(
+    id: string,
+    occurredAt: string,
+    client: PrismaQueryable,
+  ): Promise<boolean> {
+    const affectedRows = await client.$executeRaw(
+      Prisma.sql`UPDATE ticket_read_model
+       SET triage_review = 'confirmed', updated_at = ${occurredAt}::timestamptz
+       WHERE id = ${id}::bigint AND status IN ('open', 'queued') AND category_id IS NOT NULL AND triage_review IS NULL`,
+    );
+    return affectedRows === 1;
+  }
+
+  /** `CorrectTicketTriageHandler`'s write (Story 5.2). Last write wins
+   * among human corrections; guarded to the human-reviewable statuses
+   * (`open` -- triage not yet applied, a human review there wins over the
+   * late `TicketTriaged` -- and `queued`). */
+  async writeTriageCorrection(
+    id: string,
+    props: {
+      categoryId: string;
+      priority: string;
+      suggestedAgentId: string | null;
+    },
+    occurredAt: string,
+    client: PrismaQueryable,
+  ): Promise<boolean> {
+    const affectedRows = await client.$executeRaw(
+      Prisma.sql`UPDATE ticket_read_model
+       SET category_id = ${props.categoryId}::bigint, priority = ${props.priority}, suggested_agent_id = ${props.suggestedAgentId}::bigint, triage_review = 'corrected', updated_at = ${occurredAt}::timestamptz
+       WHERE id = ${id}::bigint AND status IN ('open', 'queued')`,
+    );
+    return affectedRows === 1;
+  }
+
+  /** `ListTicketsByTenantHandler`'s lookup (Story 5.2): the human queue of
+   * ONE Tenant -- `open` (not yet triaged) and `queued`, never
+   * `auto_resolving`. Newest first. */
+  async findQueueByTenant(tenantId: string): Promise<TicketReadModel[]> {
+    const rows = await this.prisma.$queryRaw<RawTicketRow[]>(
+      Prisma.sql`SELECT id, tenant_id, subject, description, status, tracking_token, requester_id, contact_email, category_id, priority, suggested_agent_id, routed_to, triage_review, created_at
+       FROM ticket_read_model
+       WHERE tenant_id = ${tenantId}::bigint AND status IN ('open', 'queued')
+       ORDER BY created_at DESC`,
+    );
+    return rows.map((row) => this.toReadModel(row));
+  }
+
   async findById(id: string): Promise<TicketReadModel | null> {
     const rows = await this.prisma.$queryRaw<RawTicketRow[]>(
-      Prisma.sql`SELECT id, tenant_id, subject, description, status, tracking_token, requester_id, contact_email, category_id, priority, suggested_agent_id, routed_to, created_at
+      Prisma.sql`SELECT id, tenant_id, subject, description, status, tracking_token, requester_id, contact_email, category_id, priority, suggested_agent_id, routed_to, triage_review, created_at
        FROM ticket_read_model
        WHERE id = ${id}::bigint`,
     );
@@ -216,7 +317,7 @@ export class TicketProjection implements IEventHandler<TicketDomainEvent> {
    * token->ticket association only lives in this projection. */
   async findByTrackingToken(token: string): Promise<TicketReadModel | null> {
     const rows = await this.prisma.$queryRaw<RawTicketRow[]>(
-      Prisma.sql`SELECT id, tenant_id, subject, description, status, tracking_token, requester_id, contact_email, category_id, priority, suggested_agent_id, routed_to, created_at
+      Prisma.sql`SELECT id, tenant_id, subject, description, status, tracking_token, requester_id, contact_email, category_id, priority, suggested_agent_id, routed_to, triage_review, created_at
        FROM ticket_read_model
        WHERE tracking_token = ${token}`,
     );
@@ -234,7 +335,7 @@ export class TicketProjection implements IEventHandler<TicketDomainEvent> {
     tenantId: string,
   ): Promise<TicketReadModel[]> {
     const rows = await this.prisma.$queryRaw<RawTicketRow[]>(
-      Prisma.sql`SELECT id, tenant_id, subject, description, status, tracking_token, requester_id, contact_email, category_id, priority, suggested_agent_id, routed_to, created_at
+      Prisma.sql`SELECT id, tenant_id, subject, description, status, tracking_token, requester_id, contact_email, category_id, priority, suggested_agent_id, routed_to, triage_review, created_at
        FROM ticket_read_model
        WHERE requester_id = ${requesterId} AND tenant_id = ${tenantId}::bigint
        ORDER BY created_at DESC`,
@@ -257,6 +358,7 @@ export class TicketProjection implements IEventHandler<TicketDomainEvent> {
       suggestedAgentId:
         row.suggested_agent_id != null ? String(row.suggested_agent_id) : null,
       routedTo: row.routed_to ?? null,
+      triageReview: row.triage_review ?? null,
       createdAt:
         row.created_at instanceof Date
           ? row.created_at.toISOString()
@@ -272,6 +374,7 @@ interface RawTicketRow {
   priority: string | null;
   suggested_agent_id: string | bigint | null;
   routed_to: string | null;
+  triage_review?: string | null;
   subject: string;
   description: string;
   status: string;

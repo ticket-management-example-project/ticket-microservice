@@ -253,4 +253,104 @@ describe('Ticket', () => {
       expect(ticket.status).toBe('queued');
     });
   });
+
+  describe('confirmTriage() / correctTriage() (Story 5.2)', () => {
+    const hydrateQueued = (over: Record<string, unknown> = {}) =>
+      Ticket.hydrate({
+        id: '1',
+        tenantId: 't-1',
+        subject: 'Asunto',
+        description: 'Descripción',
+        status: 'queued',
+        trackingToken: 'abc123',
+        requesterId: null,
+        categoryId: 'cat-1',
+        priority: 'alta',
+        suggestedAgentId: 'agent-1',
+        routedTo: 'human_queue',
+        ...over,
+      });
+
+    it('confirmTriage marks the ticket confirmed, keeping the suggested values', () => {
+      const ticket = hydrateQueued();
+
+      expect(ticket.confirmTriage('user_1')).toBe(true);
+
+      expect(ticket.triageReview).toBe('confirmed');
+      expect(ticket.categoryId).toBe('cat-1');
+      expect(ticket.status).toBe('queued');
+      expect(ticket.getUncommittedEvents()).toHaveLength(1);
+    });
+
+    it('confirmTriage is idempotent once reviewed', () => {
+      const ticket = hydrateQueued({ triageReview: 'corrected' });
+
+      expect(ticket.confirmTriage('user_1')).toBe(false);
+      expect(ticket.getUncommittedEvents()).toHaveLength(0);
+    });
+
+    it('confirmTriage throws on a degraded triage (nothing to confirm)', () => {
+      const ticket = hydrateQueued({ categoryId: null, priority: null });
+
+      expect(() => ticket.confirmTriage('user_1')).toThrow(
+        InvalidTicketException,
+      );
+    });
+
+    it('both throw unless the ticket is queued', () => {
+      const ticket = hydrateQueued({ status: 'auto_resolving' });
+
+      expect(() => ticket.confirmTriage('user_1')).toThrow(
+        InvalidTicketException,
+      );
+      expect(() =>
+        ticket.correctTriage({
+          categoryId: 'cat-2',
+          priority: 'media',
+          suggestedAgentId: null,
+          reviewedBy: 'user_1',
+        }),
+      ).toThrow(InvalidTicketException);
+    });
+
+    it('correctTriage overwrites the three fields and marks corrected', () => {
+      const ticket = hydrateQueued();
+
+      expect(
+        ticket.correctTriage({
+          categoryId: 'cat-2',
+          priority: 'media',
+          suggestedAgentId: null,
+          reviewedBy: 'user_1',
+        }),
+      ).toBe(true);
+
+      expect(ticket.categoryId).toBe('cat-2');
+      expect(ticket.priority).toBe('media');
+      expect(ticket.suggestedAgentId).toBeNull();
+      expect(ticket.triageReview).toBe('corrected');
+    });
+
+    it('correctTriage rejects an invalid priority and is idempotent for same values', () => {
+      const ticket = hydrateQueued({ triageReview: 'corrected' });
+
+      expect(() =>
+        ticket.correctTriage({
+          categoryId: 'cat-1',
+          priority: 'baja' as any,
+          suggestedAgentId: 'agent-1',
+          reviewedBy: 'user_1',
+        }),
+      ).toThrow(InvalidTicketException);
+      expect(
+        ticket.correctTriage({
+          categoryId: 'cat-1',
+          priority: 'alta',
+          suggestedAgentId: 'agent-1',
+          reviewedBy: 'user_1',
+        }),
+      ).toBe(false);
+      expect(ticket.getUncommittedEvents()).toHaveLength(0);
+    });
+  });
 });

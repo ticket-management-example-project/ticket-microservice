@@ -9,6 +9,11 @@ import {
   TicketRouting,
   TicketTriagedEvent,
 } from './events/ticket-triaged.event';
+import { TicketTriageConfirmedEvent } from './events/ticket-triage-confirmed.event';
+import { TicketTriageCorrectedEvent } from './events/ticket-triage-corrected.event';
+
+export type TriageReview = 'confirmed' | 'corrected';
+const VALID_PRIORITIES: TicketPriority[] = ['alta', 'media'];
 
 /**
  * `'queued'`/`'auto_resolving'` are Story 5.1's two triage-routing outcomes
@@ -54,6 +59,7 @@ export class Ticket extends AggregateRoot {
   private _priority: TicketPriority | null;
   private _suggestedAgentId: string | null;
   private _routedTo: TicketRouting | null;
+  private _triageReview: TriageReview | null;
 
   static create(props: {
     id: string;
@@ -150,6 +156,8 @@ export class Ticket extends AggregateRoot {
     priority?: TicketPriority | null;
     suggestedAgentId?: string | null;
     routedTo?: TicketRouting | null;
+    /** Story 5.2: `null` hasta que un agente confirma/corrige. */
+    triageReview?: TriageReview | null;
   }): Ticket {
     const ticket = new Ticket();
     ticket._id = props.id;
@@ -164,6 +172,7 @@ export class Ticket extends AggregateRoot {
     ticket._priority = props.priority ?? null;
     ticket._suggestedAgentId = props.suggestedAgentId ?? null;
     ticket._routedTo = props.routedTo ?? null;
+    ticket._triageReview = props.triageReview ?? null;
     return ticket;
   }
 
@@ -226,6 +235,84 @@ export class Ticket extends AggregateRoot {
     );
   }
 
+  /**
+   * Story 5.2: el agente acepta la sugerencia de triage. Solo sobre un
+   * Ticket `queued` con sugerencia (un triage degradado -- todo `null` -- no
+   * tiene qué confirmar). Idempotente: si ya fue revisado (confirmado o
+   * corregido) devuelve `false` sin aplicar nada.
+   */
+  confirmTriage(reviewedBy: string): boolean {
+    this.assertReviewable();
+    if (this._categoryId === null) {
+      throw new InvalidTicketException(
+        'there is no triage suggestion to confirm',
+      );
+    }
+    if (this._triageReview !== null) {
+      return false;
+    }
+    this.apply(
+      new TicketTriageConfirmedEvent(
+        this._id,
+        reviewedBy,
+        new Date().toISOString(),
+      ),
+    );
+    return true;
+  }
+
+  /**
+   * Story 5.2: el agente corrige categoría/prioridad/agente sin restricción
+   * (la sugerencia nunca es vinculante). Idempotente: mismos valores ya
+   * corregidos -> `false`. Que la categoría/agente pertenezcan al Tenant lo
+   * valida `CorrectTicketTriageHandler` (el agregado no conoce al Tenant).
+   */
+  correctTriage(props: {
+    categoryId: string;
+    priority: TicketPriority;
+    suggestedAgentId: string | null;
+    reviewedBy: string;
+  }): boolean {
+    this.assertReviewable();
+    if (!props.categoryId) {
+      throw new InvalidTicketException('categoryId must not be empty');
+    }
+    if (!VALID_PRIORITIES.includes(props.priority)) {
+      throw new InvalidTicketException(
+        `priority must be one of: ${VALID_PRIORITIES.join(', ')}`,
+      );
+    }
+    if (
+      this._triageReview === 'corrected' &&
+      this._categoryId === props.categoryId &&
+      this._priority === props.priority &&
+      this._suggestedAgentId === props.suggestedAgentId
+    ) {
+      return false;
+    }
+    this.apply(
+      new TicketTriageCorrectedEvent(
+        this._id,
+        props.categoryId,
+        props.priority,
+        props.suggestedAgentId,
+        props.reviewedBy,
+        new Date().toISOString(),
+      ),
+    );
+    return true;
+  }
+
+  private assertReviewable(): void {
+    // `open` = triage not applied yet: the human may review it anyway and
+    // that review wins over the late `TicketTriaged` (see `claimTriage`).
+    if (this._status !== 'queued' && this._status !== 'open') {
+      throw new InvalidTicketException(
+        'only a ticket in the human queue can have its triage reviewed',
+      );
+    }
+  }
+
   onTicketCreatedEvent(event: TicketCreatedEvent) {
     this._id = event.aggregateId;
     this._tenantId = event.tenantId;
@@ -239,6 +326,7 @@ export class Ticket extends AggregateRoot {
     this._priority = null;
     this._suggestedAgentId = null;
     this._routedTo = null;
+    this._triageReview = null;
   }
 
   onTicketTrackingTokenIssuedEvent(event: TicketTrackingTokenIssuedEvent) {
@@ -261,6 +349,21 @@ export class Ticket extends AggregateRoot {
     // `'queued'` (human queue), never silently to auto-resolution.
     this._status =
       event.routedTo === 'auto_resolution' ? 'auto_resolving' : 'queued';
+  }
+
+  onTicketTriageConfirmedEvent(_event: TicketTriageConfirmedEvent) {
+    this._triageReview = 'confirmed';
+  }
+
+  onTicketTriageCorrectedEvent(event: TicketTriageCorrectedEvent) {
+    this._categoryId = event.categoryId;
+    this._priority = event.priority;
+    this._suggestedAgentId = event.suggestedAgentId;
+    this._triageReview = 'corrected';
+  }
+
+  get triageReview(): TriageReview | null {
+    return this._triageReview;
   }
 
   get id(): string {
